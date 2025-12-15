@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+
+.DS_Store
+
+# Local config / secrets
+.env
+
+# Gateway-local Codex home (avoid committing auth/config)
+.codex-gateway-home/
+.codex_home*/
