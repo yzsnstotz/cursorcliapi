@@ -27,6 +27,13 @@ pip install -r requirements.txt
 
 By default it only binds to localhost (`127.0.0.1`) and uses `--sandbox read-only`.
 
+### With `.env` + helper script (recommended)
+
+```bash
+cp .env.example .env
+./scripts/serve.sh
+```
+
 ```bash
 export CODEX_WORKSPACE=/path/to/your/workspace
 export CODEX_GATEWAY_TOKEN=devtoken   # optional but recommended
