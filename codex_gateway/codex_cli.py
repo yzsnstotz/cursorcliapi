@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 from .config import ApprovalPolicy, SandboxMode
@@ -136,6 +136,8 @@ async def iter_codex_events(
     codex_cli_home: str | None,
     timeout_seconds: int,
     capture_events: bool = False,
+    event_callback: Callable[[dict], None] | None = None,
+    stderr_callback: Callable[[str], None] | None = None,
     stream_limit: int = 8 * 1024 * 1024,
 ) -> AsyncIterator[dict]:
     cmd = _build_codex_exec_cmd(
@@ -165,13 +167,32 @@ async def iter_codex_events(
     async def _drain_stderr() -> None:
         if proc.stderr is None:
             return
+        text_buf = ""
         while True:
             chunk = await proc.stderr.read(4096)
             if not chunk:
+                if stderr_callback and text_buf.strip():
+                    for line in text_buf.splitlines():
+                        line = line.strip()
+                        if line:
+                            stderr_callback(line)
                 return
             stderr_buf.extend(chunk)
             if len(stderr_buf) > 64_000:
                 del stderr_buf[:-64_000]
+            if stderr_callback:
+                text_buf += chunk.decode(errors="ignore")
+                if "\n" in text_buf:
+                    lines = text_buf.splitlines(keepends=False)
+                    # keep last partial line (if any) for next chunk
+                    if not text_buf.endswith("\n"):
+                        text_buf = lines.pop() if lines else ""
+                    else:
+                        text_buf = ""
+                    for line in lines:
+                        line = line.strip()
+                        if line:
+                            stderr_callback(line)
 
     drain_task = asyncio.create_task(_drain_stderr())
 
@@ -214,6 +235,9 @@ async def iter_codex_events(
                 err_obj = evt.get("error")
                 if isinstance(err_obj, dict) and isinstance(err_obj.get("message"), str):
                     last_error = err_obj["message"].strip() or last_error
+
+            if event_callback:
+                event_callback(evt)
 
             if capture_events:
                 yield {"_event": evt}

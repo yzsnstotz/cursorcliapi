@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Literal
@@ -45,6 +46,23 @@ def _env_csv(name: str) -> list[str]:
     return items
 
 
+def _env_json_dict_str_str(name: str) -> dict[str, str]:
+    raw = os.environ.get(name)
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(obj, dict):
+        return {}
+    out: dict[str, str] = {}
+    for k, v in obj.items():
+        if isinstance(k, str) and isinstance(v, str):
+            out[k] = v
+    return out
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.environ.get("CODEX_GATEWAY_HOST", "127.0.0.1")
@@ -71,6 +89,8 @@ class Settings:
     skip_git_repo_check: bool = _env_bool("CODEX_SKIP_GIT_REPO_CHECK", True)
     enable_search: bool = _env_bool("CODEX_ENABLE_SEARCH", False)
     add_dirs: list[str] = field(default_factory=lambda: _env_csv("CODEX_ADD_DIRS"))
+    model_aliases: dict[str, str] = field(default_factory=lambda: _env_json_dict_str_str("CODEX_MODEL_ALIASES"))
+    advertised_models: list[str] = field(default_factory=lambda: _env_csv("CODEX_ADVERTISED_MODELS"))
 
     # Hard safety caps.
     max_prompt_chars: int = _env_int("CODEX_MAX_PROMPT_CHARS", 200_000)
@@ -86,6 +106,10 @@ class Settings:
     # Compatibility: strip `</answer>` from model output for clients that parse
     # do(...)/finish(...) calls (e.g. Open-AutoGLM).
     strip_answer_tags: bool = _env_bool("CODEX_STRIP_ANSWER_TAGS", False)
+
+    # Logging / observability (prints prompts, events, and outputs to server logs).
+    debug_log: bool = _env_bool("CODEX_DEBUG_LOG", False)
+    log_max_chars: int = _env_int("CODEX_LOG_MAX_CHARS", 4000)
 
 
 settings = Settings()

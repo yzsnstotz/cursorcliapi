@@ -83,6 +83,8 @@ curl -N http://127.0.0.1:8000/v1/chat/completions \
 - `CODEX_WORKSPACE`: directory passed to `codex exec --cd`
 - `CODEX_CLI_HOME`: override HOME for the `codex` subprocess (use a minimal `~/.codex/config.toml` here to avoid starting MCP servers)
 - `CODEX_MODEL`: default model id (default: `gpt-5-codex`)
+- `CODEX_MODEL_ALIASES`: JSON map of request model -> real model (e.g. `{"autoglm-phone":"gpt-5.2"}`)
+- `CODEX_ADVERTISED_MODELS`: comma-separated list for `GET /v1/models` (defaults to `CODEX_MODEL`)
 - `CODEX_MODEL_REASONING_EFFORT`: `low|medium|high|xhigh` (default: `high`)
 - `CODEX_SANDBOX`: `read-only` | `workspace-write` | `danger-full-access` (default: `read-only`)
 - `CODEX_APPROVAL_POLICY`: `untrusted|on-failure|on-request|never` (default: `never`)
@@ -96,6 +98,8 @@ curl -N http://127.0.0.1:8000/v1/chat/completions \
 - `CODEX_SUBPROCESS_STREAM_LIMIT`: asyncio stream limit for `codex` subprocess pipes (default: `8388608`)
 - `CODEX_CORS_ORIGINS`: comma-separated origins for CORS (default: empty/disabled)
 - `CODEX_STRIP_ANSWER_TAGS`: `1/0` (default: `0`) strip `</answer>` for action-parsing clients (e.g. Open-AutoGLM)
+- `CODEX_DEBUG_LOG`: `1/0` (default: `0`) log prompt/events/response to server logs
+- `CODEX_LOG_MAX_CHARS`: truncate long log lines (default: `4000`)
 
 ## Security notes
 
