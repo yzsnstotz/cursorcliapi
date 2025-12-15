@@ -75,6 +75,18 @@ def _openai_error(message: str, *, status_code: int = 500) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=payload)
 
 
+def _maybe_strip_answer_tags(text: str) -> str:
+    """
+    Optional compatibility shim for clients that parse a single do(...)/finish(...)
+    expression and choke on trailing XML tags like </answer>.
+    """
+    if not settings.strip_answer_tags:
+        return text
+    if not text:
+        return text
+    return text.replace("</answer>", "")
+
+
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
@@ -124,8 +136,10 @@ async def chat_completions(
                     add_dirs=settings.add_dirs,
                     codex_cli_home=settings.codex_cli_home,
                     timeout_seconds=settings.timeout_seconds,
+                    stream_limit=settings.subprocess_stream_limit,
                 )
                 result = await collect_codex_text_and_usage_from_events(events)
+            text = _maybe_strip_answer_tags(result.text)
             return {
                 "id": resp_id,
                 "object": "chat.completion",
@@ -134,7 +148,7 @@ async def chat_completions(
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": result.text},
+                        "message": {"role": "assistant", "content": text},
                         "finish_reason": "stop",
                     }
                 ],
@@ -165,6 +179,7 @@ async def chat_completions(
                     add_dirs=settings.add_dirs,
                     codex_cli_home=settings.codex_cli_home,
                     timeout_seconds=settings.timeout_seconds,
+                    stream_limit=settings.subprocess_stream_limit,
                 )
                 async with aclosing(events):
                     async for evt in events:
@@ -173,7 +188,7 @@ async def chat_completions(
                         if evt.get("type") == "item.completed":
                             item = evt.get("item") or {}
                             if item.get("type") == "agent_message":
-                                text = item.get("text") or ""
+                                text = _maybe_strip_answer_tags(item.get("text") or "")
                                 if text:
                                     chunk = {
                                         "id": resp_id,

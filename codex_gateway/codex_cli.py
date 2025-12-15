@@ -87,6 +87,7 @@ async def run_codex_final(
     add_dirs: list[str],
     codex_cli_home: str | None,
     timeout_seconds: int,
+    stream_limit: int = 8 * 1024 * 1024,
 ) -> CodexResult:
     cmd = _build_codex_exec_cmd(
         prompt=prompt,
@@ -105,6 +106,7 @@ async def run_codex_final(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        limit=stream_limit,
         env=_build_env(codex_cli_home),
     )
     try:
@@ -134,6 +136,7 @@ async def iter_codex_events(
     codex_cli_home: str | None,
     timeout_seconds: int,
     capture_events: bool = False,
+    stream_limit: int = 8 * 1024 * 1024,
 ) -> AsyncIterator[dict]:
     cmd = _build_codex_exec_cmd(
         prompt=prompt,
@@ -152,6 +155,7 @@ async def iter_codex_events(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        limit=stream_limit,
         env=_build_env(codex_cli_home),
     )
 
@@ -182,6 +186,15 @@ async def iter_codex_events(
                 proc.kill()
                 await proc.wait()
                 raise
+            except ValueError as e:
+                proc.kill()
+                await proc.wait()
+                msg = bytes(stderr_buf).decode(errors="ignore").strip()
+                hint = (
+                    f"codex exec output line exceeded asyncio stream limit ({stream_limit} bytes). "
+                    "Increase CODEX_SUBPROCESS_STREAM_LIMIT."
+                )
+                raise RuntimeError(f"{hint}\n{msg}".strip()) from e
 
             if not line:
                 break

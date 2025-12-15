@@ -76,9 +76,16 @@ class Settings:
     max_prompt_chars: int = _env_int("CODEX_MAX_PROMPT_CHARS", 200_000)
     timeout_seconds: int = _env_int("CODEX_TIMEOUT_SECONDS", 600)
     max_concurrency: int = _env_int("CODEX_MAX_CONCURRENCY", 2)
+    # asyncio StreamReader limit for the Codex subprocess pipes. The default (64KiB)
+    # is often too small for NDJSON events that can contain large assistant/tool text.
+    subprocess_stream_limit: int = _env_int("CODEX_SUBPROCESS_STREAM_LIMIT", 8 * 1024 * 1024)
 
     # CORS (comma-separated origins). Empty disables CORS.
     cors_origins: str = os.environ.get("CODEX_CORS_ORIGINS", "")
+
+    # Compatibility: strip `</answer>` from model output for clients that parse
+    # do(...)/finish(...) calls (e.g. Open-AutoGLM).
+    strip_answer_tags: bool = _env_bool("CODEX_STRIP_ANSWER_TAGS", False)
 
 
 settings = Settings()

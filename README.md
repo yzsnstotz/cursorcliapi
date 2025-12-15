@@ -93,7 +93,9 @@ curl -N http://127.0.0.1:8000/v1/chat/completions \
 - `CODEX_TIMEOUT_SECONDS`: (default: `600`)
 - `CODEX_MAX_CONCURRENCY`: (default: `2`)
 - `CODEX_MAX_PROMPT_CHARS`: (default: `200000`)
+- `CODEX_SUBPROCESS_STREAM_LIMIT`: asyncio stream limit for `codex` subprocess pipes (default: `8388608`)
 - `CODEX_CORS_ORIGINS`: comma-separated origins for CORS (default: empty/disabled)
+- `CODEX_STRIP_ANSWER_TAGS`: `1/0` (default: `0`) strip `</answer>` for action-parsing clients (e.g. Open-AutoGLM)
 
 ## Security notes
 
