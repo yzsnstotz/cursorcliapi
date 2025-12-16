@@ -768,6 +768,7 @@ async def chat_completions(
 
                         assembler = TextAssembler()
                         fallback_text: str | None = None
+                        reported_model: str | None = None
                         async for evt in iter_stream_json_events(
                             cmd=cmd,
                             env=None,
@@ -776,6 +777,22 @@ async def chat_completions(
                             event_callback=_evt_log,
                             stderr_callback=_stderr_log,
                         ):
+                            if (
+                                reported_model is None
+                                and evt.get("type") == "system"
+                                and evt.get("subtype") == "init"
+                                and isinstance(evt.get("model"), str)
+                            ):
+                                reported_model = evt["model"]
+                                if settings.debug_log:
+                                    logger.info(
+                                        "[%s] cursor-agent init model=%s apiKeySource=%s permissionMode=%s session_id=%s",
+                                        resp_id,
+                                        reported_model,
+                                        evt.get("apiKeySource"),
+                                        evt.get("permissionMode"),
+                                        evt.get("session_id"),
+                                    )
                             extract_cursor_agent_delta(evt, assembler)
                             if evt.get("type") == "result" and isinstance(evt.get("result"), str):
                                 fallback_text = evt["result"]
@@ -952,7 +969,11 @@ async def chat_completions(
                                     stderr_callback=_stderr_log,
                                 )
                         elif provider == "cursor-agent":
-                            cursor_model = provider_model or settings.cursor_agent_model
+                            cursor_model = provider_model or settings.cursor_agent_model or "auto"
+                            cursor_init_logged = False
+                            if settings.debug_log:
+                                src = "request" if provider_model else ("env" if settings.cursor_agent_model else "default")
+                                logger.info("[%s] cursor-agent model=%s model_src=%s", resp_id, cursor_model, src)
                             cmd = [
                                 settings.cursor_agent_bin,
                                 "-p",
@@ -968,6 +989,8 @@ async def chat_completions(
                             if settings.cursor_agent_stream_partial_output:
                                 cmd.append("--stream-partial-output")
                             cmd.append(prompt)
+                            if settings.debug_log:
+                                logger.info("[%s] cursor-agent cmd=%s", resp_id, " ".join(cmd[:12] + (["..."] if len(cmd) > 12 else [])))
                             events = iter_stream_json_events(
                                 cmd=cmd,
                                 env=None,
@@ -1106,6 +1129,23 @@ async def chat_completions(
                                             if item.get("type") == "agent_message":
                                                 delta = _maybe_strip_answer_tags(str(item.get("text") or ""))
                                 elif provider == "cursor-agent":
+                                    if (
+                                        not cursor_init_logged
+                                        and isinstance(evt, dict)
+                                        and evt.get("type") == "system"
+                                        and evt.get("subtype") == "init"
+                                        and isinstance(evt.get("model"), str)
+                                    ):
+                                        cursor_init_logged = True
+                                        if settings.debug_log:
+                                            logger.info(
+                                                "[%s] cursor-agent init model=%s apiKeySource=%s permissionMode=%s session_id=%s",
+                                                resp_id,
+                                                evt.get("model"),
+                                                evt.get("apiKeySource"),
+                                                evt.get("permissionMode"),
+                                                evt.get("session_id"),
+                                            )
                                     delta = _maybe_strip_answer_tags(extract_cursor_agent_delta(evt, assembler))
                                 elif provider == "claude":
                                     delta = _maybe_strip_answer_tags(extract_claude_delta(evt, assembler))
