@@ -88,13 +88,15 @@ curl -N http://127.0.0.1:8000/v1/chat/completions \
 ## Configuration (env vars)
 
 - `CODEX_WORKSPACE`: directory passed to `codex exec --cd`
-- `CODEX_CLI_HOME`: override HOME for the `codex` subprocess (use a minimal `~/.codex/config.toml` here to avoid starting MCP servers)
+- `CODEX_CLI_HOME`: override HOME for the `codex` subprocess (default: `./.codex-gateway-home`)
+- `CODEX_USE_SYSTEM_CODEX_HOME`: `1/0` (default: `0`) use your normal `~/.codex` config instead of the gateway home
 - `CODEX_MODEL`: default model id (default: `gpt-5-codex`)
 - `CODEX_MODEL_ALIASES`: JSON map of request model -> real model (e.g. `{"autoglm-phone":"gpt-5.2"}`)
 - `CODEX_ADVERTISED_MODELS`: comma-separated list for `GET /v1/models` (defaults to `CODEX_MODEL`)
 - `CODEX_MODEL_REASONING_EFFORT`: `low|medium|high|xhigh` (default: `high`)
 - `CODEX_SANDBOX`: `read-only` | `workspace-write` | `danger-full-access` (default: `read-only`)
 - `CODEX_APPROVAL_POLICY`: `untrusted|on-failure|on-request|never` (default: `never`)
+- `CODEX_DISABLE_SHELL_TOOL`: `1/0` (default: `1`) disable Codex shell tool so responses stay "model-like" and avoid surprise command executions
 - `CODEX_ENABLE_SEARCH`: `1/0` (default: `0`)
 - `CODEX_ADD_DIRS`: comma-separated extra writable dirs (default: empty)
 - `CODEX_SKIP_GIT_REPO_CHECK`: `1/0` (default: `1`)
@@ -137,7 +139,12 @@ Keep it private by default, use a token, and run in an isolated environment when
 If your normal `~/.codex/config.toml` has many `mcp_servers.*` entries, **Codex will start them for every `codex exec` call**
 and include their tool schemas in the prompt. This can add **seconds of startup time** and **10k+ prompt tokens** per request.
 
-For an HTTP gateway, it’s usually best to run Codex with a minimal config (no MCP servers):
+For an HTTP gateway, it’s usually best to run Codex with a minimal config (no MCP servers).
+
+This project **defaults** to a gateway-local HOME at `./.codex-gateway-home` so it doesn’t inherit your global `~/.codex/config.toml`.
+On first run it will try to copy `~/.codex/auth.json` into `./.codex-gateway-home/.codex/auth.json` (so you don’t have to).
+
+If you want to set it up manually or customize it:
 
 ```bash
 mkdir -p .codex-gateway-home/.codex
@@ -150,5 +157,6 @@ model_reasoning_effort = "low"
 trust_level = "trusted"
 EOF
 
+# Optional override (the default is already ./.codex-gateway-home):
 export CODEX_CLI_HOME=$PWD/.codex-gateway-home
 ```

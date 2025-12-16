@@ -8,6 +8,9 @@ from typing import Literal
 SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
 ApprovalPolicy = Literal["untrusted", "on-failure", "on-request", "never"]
 
+_GATEWAY_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+_DEFAULT_CODEX_CLI_HOME = os.path.join(_GATEWAY_ROOT, ".codex-gateway-home")
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
@@ -76,7 +79,11 @@ class Settings:
 
     # Optional HOME override for the Codex CLI subprocess. Use this to point at a minimal
     # `~/.codex/config.toml` (e.g. without MCP servers) for much lower latency.
-    codex_cli_home: str | None = os.environ.get("CODEX_CLI_HOME")
+    codex_cli_home: str | None = (
+        None
+        if _env_bool("CODEX_USE_SYSTEM_CODEX_HOME", False)
+        else (os.environ.get("CODEX_CLI_HOME") or _DEFAULT_CODEX_CLI_HOME)
+    )
 
     # Codex CLI options.
     default_model: str = os.environ.get("CODEX_MODEL", "gpt-5-codex")
@@ -91,6 +98,7 @@ class Settings:
     add_dirs: list[str] = field(default_factory=lambda: _env_csv("CODEX_ADD_DIRS"))
     model_aliases: dict[str, str] = field(default_factory=lambda: _env_json_dict_str_str("CODEX_MODEL_ALIASES"))
     advertised_models: list[str] = field(default_factory=lambda: _env_csv("CODEX_ADVERTISED_MODELS"))
+    disable_shell_tool: bool = _env_bool("CODEX_DISABLE_SHELL_TOOL", True)
 
     # Optional other agent CLIs (multi-provider).
     cursor_agent_bin: str = os.environ.get("CURSOR_AGENT_BIN", "cursor-agent")

@@ -3,10 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .config import ApprovalPolicy, SandboxMode
+
+_GATEWAY_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_CODEX_CLI_HOME = str(_GATEWAY_ROOT / ".codex-gateway-home")
 
 
 @dataclass(frozen=True)
@@ -23,12 +28,60 @@ def _build_env(codex_cli_home: str | None) -> dict[str, str]:
     return env
 
 
+def _toml_escape_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _ensure_codex_home(
+    *,
+    codex_cli_home: str | None,
+    trusted_dir: str,
+    default_model: str,
+    model_reasoning_effort: str | None,
+) -> None:
+    """
+    Ensure `codex exec` can run with a minimal HOME, without inheriting the user's
+    global ~/.codex/config.toml (which may include MCP servers/tools).
+    """
+    if not codex_cli_home:
+        return
+
+    codex_dir = Path(codex_cli_home) / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
+
+    # Auth: copy from the user's normal Codex location if missing.
+    dest_auth = codex_dir / "auth.json"
+    if not dest_auth.exists():
+        src_auth = Path.home() / ".codex" / "auth.json"
+        if src_auth.exists():
+            shutil.copy2(src_auth, dest_auth)
+
+    # Minimal config: set trust for the workspace and keep it MCP-free.
+    config_path = codex_dir / "config.toml"
+    managed_home = os.path.abspath(codex_cli_home) == os.path.abspath(_DEFAULT_CODEX_CLI_HOME)
+    if managed_home or not config_path.exists():
+        trusted = _toml_escape_string(os.path.abspath(trusted_dir))
+        model_str = _toml_escape_string(default_model)
+        lines: list[str] = [f'model = "{model_str}"']
+        if model_reasoning_effort:
+            effort_str = _toml_escape_string(model_reasoning_effort)
+            lines.append(f'model_reasoning_effort = "{effort_str}"')
+        lines.append("")
+        if managed_home:
+            lines.append("# Managed by codex-api; set CODEX_CLI_HOME to use your own config.")
+            lines.append("")
+        lines.append(f'[projects."{trusted}"]')
+        lines.append('trust_level = "trusted"')
+        config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _build_codex_exec_cmd(
     *,
     prompt: str,
     model: str,
     cd: str,
     images: list[str],
+    disable_shell_tool: bool,
     sandbox: SandboxMode,
     approval_policy: ApprovalPolicy,
     enable_search: bool,
@@ -40,6 +93,8 @@ def _build_codex_exec_cmd(
     # Note: some flags (e.g. `-a/--ask-for-approval`, `--search`) are global and must appear
     # before the `exec` subcommand.
     cmd: list[str] = ["codex", "-a", approval_policy]
+    if disable_shell_tool:
+        cmd.extend(["--disable", "shell_tool"])
     if enable_search:
         cmd.append("--search")
 
@@ -84,6 +139,7 @@ async def run_codex_final(
     model: str,
     cd: str,
     images: list[str],
+    disable_shell_tool: bool,
     sandbox: SandboxMode,
     skip_git_repo_check: bool,
     model_reasoning_effort: str | None,
@@ -94,11 +150,18 @@ async def run_codex_final(
     timeout_seconds: int,
     stream_limit: int = 8 * 1024 * 1024,
 ) -> CodexResult:
+    _ensure_codex_home(
+        codex_cli_home=codex_cli_home,
+        trusted_dir=cd,
+        default_model=model,
+        model_reasoning_effort=model_reasoning_effort,
+    )
     cmd = _build_codex_exec_cmd(
         prompt=prompt,
         model=model,
         cd=cd,
         images=images,
+        disable_shell_tool=disable_shell_tool,
         sandbox=sandbox,
         approval_policy=approval_policy,
         enable_search=enable_search,
@@ -134,6 +197,7 @@ async def iter_codex_events(
     model: str,
     cd: str,
     images: list[str],
+    disable_shell_tool: bool,
     sandbox: SandboxMode,
     skip_git_repo_check: bool,
     model_reasoning_effort: str | None,
@@ -147,11 +211,18 @@ async def iter_codex_events(
     stderr_callback: Callable[[str], None] | None = None,
     stream_limit: int = 8 * 1024 * 1024,
 ) -> AsyncIterator[dict]:
+    _ensure_codex_home(
+        codex_cli_home=codex_cli_home,
+        trusted_dir=cd,
+        default_model=model,
+        model_reasoning_effort=model_reasoning_effort,
+    )
     cmd = _build_codex_exec_cmd(
         prompt=prompt,
         model=model,
         cd=cd,
         images=images,
+        disable_shell_tool=disable_shell_tool,
         sandbox=sandbox,
         approval_policy=approval_policy,
         enable_search=enable_search,
