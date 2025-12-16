@@ -1,7 +1,7 @@
 [project]
-name = "codex-api-gateway"
+name = "agent-cli-to-api"
 version = "0.1.0"
-description = "Expose `codex exec` as a small OpenAI-compatible HTTP API."
+description = "Expose agent CLIs as a small OpenAI-compatible HTTP API."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,4 +9,3 @@ dependencies = [
   "pydantic>=2.7.0",
   "uvicorn[standard]>=0.30.0",
 ]
-

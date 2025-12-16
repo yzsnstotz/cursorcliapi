@@ -27,7 +27,7 @@ from .stream_json_cli import (
     iter_stream_json_events,
 )
 
-app = FastAPI(title="codex-api-gateway", version="0.1.0")
+app = FastAPI(title="agent-cli-to-api", version="0.1.0")
 logger = logging.getLogger("uvicorn.error")
 
 if settings.cors_origins.strip():

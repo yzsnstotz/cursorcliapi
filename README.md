@@ -1,11 +1,23 @@
-# codex-api
+# agent-cli-to-api
 
-Expose `codex exec` as a small OpenAI-compatible HTTP API (local or deployable).
+Expose popular **agent CLIs** as a small **OpenAI-compatible** HTTP API (`/v1/*`).
+
+Works great as a local gateway (localhost) or behind a reverse proxy.
+
+Supported backends:
+- OpenAI Codex CLI (`codex exec`)
+- Cursor Agent CLI (`cursor-agent`)
+- Claude Code CLI (`claude`)
+- Gemini CLI (`gemini`)
+
+Why this exists:
+- Many tools/SDKs only speak the OpenAI API (`/v1/chat/completions`) — this lets you plug agent CLIs into that ecosystem.
+- One gateway, multiple CLIs: pick a backend by `model` (with optional prefixes like `cursor:` / `claude:` / `gemini:`).
 
 ## Requirements
 
 - Python 3.10+ (tested on 3.13)
-- `codex` CLI installed and authenticated on the machine that runs this server
+- Install and authenticate the CLI(s) you want to use (`codex`, `cursor-agent`, `claude`, `gemini`)
 
 ## Install
 
@@ -58,6 +70,8 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 - `GET /v1/models`
 - `POST /v1/chat/completions` (supports `stream`)
 
+Tip: any OpenAI SDK that supports `base_url` should work by pointing it at this server.
+
 ### Example (non-stream)
 
 ```bash
@@ -104,10 +118,10 @@ curl -N http://127.0.0.1:8000/v1/chat/completions \
 - `CODEX_TIMEOUT_SECONDS`: (default: `600`)
 - `CODEX_MAX_CONCURRENCY`: (default: `2`)
 - `CODEX_MAX_PROMPT_CHARS`: (default: `200000`)
-- `CODEX_SUBPROCESS_STREAM_LIMIT`: asyncio stream limit for subprocess pipes (default: `8388608`)
+- `CODEX_SUBPROCESS_STREAM_LIMIT`: asyncio stream limit for subprocess pipes (default: `16777216`)
 - `CODEX_CORS_ORIGINS`: comma-separated origins for CORS (default: empty/disabled)
-- `CODEX_SSE_KEEPALIVE_SECONDS`: send SSE keep-alives to prevent client read timeouts (default: `5`)
-- `CODEX_STRIP_ANSWER_TAGS`: `1/0` (default: `0`) strip `</answer>` for action-parsing clients (e.g. Open-AutoGLM)
+- `CODEX_SSE_KEEPALIVE_SECONDS`: send SSE keep-alives to prevent client read timeouts (default: `2`)
+- `CODEX_STRIP_ANSWER_TAGS`: `1/0` (default: `1`) strip `<think>/<answer>` tags for action-parsing clients (e.g. Open-AutoGLM)
 - `CODEX_ENABLE_IMAGE_INPUT`: `1/0` (default: `1`) decode OpenAI-style `image_url` parts and pass them to `codex exec --image`
 - `CODEX_MAX_IMAGE_COUNT`: (default: `4`)
 - `CODEX_MAX_IMAGE_BYTES`: (default: `8388608`)
@@ -128,6 +142,10 @@ Optional env vars:
 - `CURSOR_AGENT_BIN`, `CLAUDE_BIN`, `GEMINI_BIN`: override the CLI binary names/paths
 - `CURSOR_AGENT_API_KEY` / `CURSOR_API_KEY`: Cursor authentication for `cursor-agent`
 - `CURSOR_AGENT_MODEL`, `CLAUDE_MODEL`, `GEMINI_MODEL`: default model when the prefix doesn’t include `:<model>`
+
+## Keywords (SEO)
+
+OpenAI-compatible API, chat completions, SSE streaming, agent gateway, CLI to API proxy, Codex CLI, Cursor Agent, Claude Code, Gemini CLI.
 
 ## Security notes
 
