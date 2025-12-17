@@ -67,6 +67,7 @@ Notes:
 - If `CODEX_WORKSPACE` is unset, the gateway creates an empty temp workspace under `/tmp` (so you don't need to configure a repo path).
 - When you start with a fixed provider (e.g. `... gemini`), the client-sent `model` string is accepted but ignored by default (gateway uses the provider's default model).
 - Each provider still requires its own local CLI login state (no API key is required for Codex / Gemini CloudCode / Claude OAuth).
+- `uv run agent-cli-to-api cursor-agent` defaults to a fast Cursor model (`gpt-5.1-codex`). To use Cursor Auto routing instead, set `CURSOR_AGENT_MODEL=auto` or run with `--preset cursor-auto`.
 
 Quick smoke test (optional):
 
@@ -197,6 +198,7 @@ uv run agent-cli-to-api codex
 Supported presets:
 - `codex-fast`
 - `autoglm-phone`
+- `cursor-fast` (default for `cursor-agent`)
 - `cursor-auto`
 - `claude-oauth`
 - `gemini-cloudcode`

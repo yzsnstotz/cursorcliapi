@@ -134,7 +134,7 @@ def _provider_default_model(provider: str) -> str | None:
     if provider == "codex":
         return settings.default_model
     if provider == "cursor-agent":
-        return settings.cursor_agent_model or "auto"
+        return settings.cursor_agent_model or "gpt-5.1-codex"
     if provider == "claude":
         return settings.claude_model or "sonnet"
     if provider == "gemini":
@@ -813,7 +813,7 @@ async def chat_completions(
                         text = result.text
                         usage = result.usage
                     elif provider == "cursor-agent":
-                        cursor_model = provider_model or settings.cursor_agent_model or "auto"
+                        cursor_model = provider_model or settings.cursor_agent_model or "gpt-5.1-codex"
                         if settings.log_events:
                             src = "request" if provider_model else ("env" if settings.cursor_agent_model else "default")
                             logger.info("[%s] cursor-agent model=%s model_src=%s", resp_id, cursor_model, src)
@@ -1085,7 +1085,7 @@ async def chat_completions(
                                     stderr_callback=_stderr_log,
                                 )
                         elif provider == "cursor-agent":
-                            cursor_model = provider_model or settings.cursor_agent_model or "auto"
+                            cursor_model = provider_model or settings.cursor_agent_model or "gpt-5.1-codex"
                             cursor_init_logged = False
                             if settings.log_events:
                                 src = "request" if provider_model else ("env" if settings.cursor_agent_model else "default")

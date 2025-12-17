@@ -123,6 +123,14 @@ def _apply_preset() -> None:
             "CODEX_ALLOW_CLIENT_MODEL_OVERRIDE": "0",
         },
         # Force cursor-agent provider, keep it "API-like" by disabling indexing by default.
+        "cursor-fast": {
+            "CODEX_PROVIDER": "cursor-agent",
+            "CURSOR_AGENT_MODEL": "gpt-5.1-codex",
+            "CURSOR_AGENT_DISABLE_INDEXING": "1",
+            "CODEX_LOG_MODE": "qa",
+            "CODEX_LOG_MAX_CHARS": "4000",
+            "CODEX_LOG_EVENTS": "0",
+        },
         "cursor-auto": {
             "CODEX_PROVIDER": "cursor-agent",
             "CURSOR_AGENT_MODEL": "auto",
@@ -195,6 +203,12 @@ def _apply_preset_env() -> None:
             "CODEX_LOG_MODE": "qa",
         },
         # Cursor Agent via CLI (avoid indexing by default).
+        "cursor-fast": {
+            "CODEX_PROVIDER": "cursor-agent",
+            "CURSOR_AGENT_MODEL": "gpt-5.1-codex",
+            "CURSOR_AGENT_DISABLE_INDEXING": "1",
+            "CODEX_LOG_MODE": "qa",
+        },
         "cursor-auto": {
             "CODEX_PROVIDER": "cursor-agent",
             "CURSOR_AGENT_MODEL": "auto",

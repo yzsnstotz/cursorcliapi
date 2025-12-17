@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
         if normalized_provider == "codex":
             os.environ.setdefault("CODEX_PRESET", "codex-fast")
         elif normalized_provider == "cursor-agent":
-            os.environ.setdefault("CODEX_PRESET", "cursor-auto")
+            os.environ.setdefault("CODEX_PRESET", "cursor-fast")
         elif normalized_provider == "gemini":
             creds = Path(os.environ.get("GEMINI_OAUTH_CREDS_PATH", "~/.gemini/oauth_creds.json")).expanduser()
             if creds.exists():
