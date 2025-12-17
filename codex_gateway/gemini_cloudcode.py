@@ -34,8 +34,8 @@ _CACHED_ACCESS_TOKEN_EXPIRY_MS: int | None = None
 _PROJECT_ID_LOCK = None
 _CACHED_PROJECT_ID: str | None = None
 
-_OAUTH_CLIENT_ID_LITERAL_RE = re.compile(r"\\bOAUTH_CLIENT_ID\\b\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]")
-_OAUTH_CLIENT_SECRET_LITERAL_RE = re.compile(r"\\bOAUTH_CLIENT_SECRET\\b\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]")
+_OAUTH_CLIENT_ID_LITERAL_RE = re.compile(r"\bOAUTH_CLIENT_ID\b\s*=\s*['\"]([^'\"]+)['\"]")
+_OAUTH_CLIENT_SECRET_LITERAL_RE = re.compile(r"\bOAUTH_CLIENT_SECRET\b\s*=\s*['\"]([^'\"]+)['\"]")
 
 
 def _ensure_locks() -> None:
