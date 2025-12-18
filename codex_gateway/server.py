@@ -10,6 +10,7 @@ import tempfile
 import time
 import uuid
 from contextlib import aclosing, suppress
+from dataclasses import dataclass, field
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -236,7 +237,115 @@ def _short_id(resp_id: str) -> str:
     return resp_id[:8]
 
 
-def _maybe_print_markdown(resp_id: str, label: str, text: str, *, duration_ms: int | None = None) -> bool:
+# ─────────────────────────────────────────────────────────────────────────────
+# Request Statistics Tracking
+# ─────────────────────────────────────────────────────────────────────────────
+@dataclass
+class RequestStats:
+    """Track request statistics for periodic reporting."""
+    total_requests: int = 0
+    successful_requests: int = 0
+    failed_requests: int = 0
+    total_duration_ms: int = 0
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    last_report_time: float = field(default_factory=time.time)
+    
+    def record_success(self, duration_ms: int, usage: dict[str, int] | None) -> None:
+        self.total_requests += 1
+        self.successful_requests += 1
+        self.total_duration_ms += duration_ms
+        if usage:
+            self.total_prompt_tokens += usage.get("prompt_tokens", 0)
+            self.total_completion_tokens += usage.get("completion_tokens", 0)
+    
+    def record_failure(self) -> None:
+        self.total_requests += 1
+        self.failed_requests += 1
+    
+    def avg_duration_ms(self) -> float:
+        if self.successful_requests == 0:
+            return 0
+        return self.total_duration_ms / self.successful_requests
+    
+    def reset(self) -> "RequestStats":
+        """Return current stats and reset counters."""
+        snapshot = RequestStats(
+            total_requests=self.total_requests,
+            successful_requests=self.successful_requests,
+            failed_requests=self.failed_requests,
+            total_duration_ms=self.total_duration_ms,
+            total_prompt_tokens=self.total_prompt_tokens,
+            total_completion_tokens=self.total_completion_tokens,
+            last_report_time=self.last_report_time,
+        )
+        self.total_requests = 0
+        self.successful_requests = 0
+        self.failed_requests = 0
+        self.total_duration_ms = 0
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.last_report_time = time.time()
+        return snapshot
+
+
+_request_stats = RequestStats()
+_STATS_INTERVAL_SECONDS = 60  # Report every 60 seconds
+
+
+def _maybe_print_stats() -> None:
+    """Print stats summary if interval has passed."""
+    global _request_stats
+    now = time.time()
+    elapsed = now - _request_stats.last_report_time
+    
+    if elapsed < _STATS_INTERVAL_SECONDS or _request_stats.total_requests == 0:
+        return
+    
+    stats = _request_stats.reset()
+    
+    try:
+        from rich.console import Console
+        from rich.table import Table
+    except Exception:
+        # Fallback to plain logging
+        logger.info(
+            "📊 Stats (last %ds): requests=%d success=%d failed=%d avg_ms=%.0f tokens=%d",
+            int(elapsed), stats.total_requests, stats.successful_requests,
+            stats.failed_requests, stats.avg_duration_ms(),
+            stats.total_prompt_tokens + stats.total_completion_tokens
+        )
+        return
+    
+    global _RICH_CONSOLE
+    if _RICH_CONSOLE is None:
+        _RICH_CONSOLE = Console(stderr=True)
+    
+    console: Console = _RICH_CONSOLE  # type: ignore[assignment]
+    
+    table = Table(title=f"📊 Stats Summary (last {int(elapsed)}s)", border_style="dim")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green", justify="right")
+    
+    table.add_row("Total Requests", str(stats.total_requests))
+    table.add_row("✅ Successful", str(stats.successful_requests))
+    table.add_row("❌ Failed", str(stats.failed_requests))
+    table.add_row("⏱️ Avg Duration", f"{stats.avg_duration_ms():.0f}ms")
+    table.add_row("📥 Prompt Tokens", f"{stats.total_prompt_tokens:,}")
+    table.add_row("📤 Completion Tokens", f"{stats.total_completion_tokens:,}")
+    table.add_row("📊 Total Tokens", f"{stats.total_prompt_tokens + stats.total_completion_tokens:,}")
+    
+    console.print(table)
+
+
+def _maybe_print_markdown(
+    resp_id: str,
+    label: str,
+    text: str,
+    *,
+    duration_ms: int | None = None,
+    usage: dict[str, int] | None = None,
+) -> bool:
     """
     Best-effort: render markdown to the terminal for easier reading.
     Returns True if rendered (so callers can skip duplicate plain logging).
@@ -268,14 +377,44 @@ def _maybe_print_markdown(resp_id: str, label: str, text: str, *, duration_ms: i
         title = f"📝 Question [{short}]"
     elif label == "A":
         style = "green"
-        duration_str = f" ⏱️ {duration_ms/1000:.1f}s" if duration_ms else ""
-        title = f"✅ Answer [{short}]{duration_str}"
+        parts = [f"✅ Answer [{short}]"]
+        if duration_ms:
+            parts.append(f"⏱️ {duration_ms/1000:.1f}s")
+        if usage:
+            total = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+            if total > 0:
+                parts.append(f"🔢 {total:,} tokens")
+        title = " ".join(parts)
     else:
         style = "blue"
         title = f"[{short}] {label}"
     
     console.print(Panel(Markdown(payload), title=title, border_style=style, expand=False))
     return True
+
+
+def _print_error_panel(resp_id: str, error_msg: str, status_code: int = 500) -> None:
+    """Print error in a red panel for visibility."""
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+    except Exception:
+        return
+    
+    global _RICH_CONSOLE
+    if _RICH_CONSOLE is None:
+        _RICH_CONSOLE = Console(stderr=True)
+    
+    console: Console = _RICH_CONSOLE  # type: ignore[assignment]
+    short = _short_id(resp_id)
+    
+    console.print(Panel(
+        Text(error_msg, style="bold white"),
+        title=f"❌ Error [{short}] HTTP {status_code}",
+        border_style="red",
+        expand=False
+    ))
 
 
 def _print_separator(resp_id: str, label: str = "REQUEST") -> None:
@@ -1076,11 +1215,16 @@ async def chat_completions(
             duration_ms = int((time.time() - t0) * 1000)
             usage_str = f" usage={usage}" if isinstance(usage, dict) else ""
             logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(text), usage_str)
+            
+            # Record stats
+            _request_stats.record_success(duration_ms, usage)
+            _maybe_print_stats()
+            
             if log_mode == "qa" and text:
-                if not _maybe_print_markdown(resp_id, "A", text, duration_ms=duration_ms):
+                if not _maybe_print_markdown(resp_id, "A", text, duration_ms=duration_ms, usage=usage):
                     logger.info("[%s] A:\n%s", resp_id, _truncate_for_log(text))
             elif log_mode == "full" and text:
-                if not _maybe_print_markdown(resp_id, "RESPONSE", text):
+                if not _maybe_print_markdown(resp_id, "RESPONSE", text, duration_ms=duration_ms, usage=usage):
                     logger.info("[%s] RESPONSE:\n%s", resp_id, _truncate_for_log(text))
             response: dict = {
                 "id": resp_id,
@@ -1472,22 +1616,34 @@ async def chat_completions(
                     len(assembled),
                     usage_str,
                 )
+                
+                # Record stats
+                _request_stats.record_success(duration_ms, stream_usage)
+                _maybe_print_stats()
+                
                 if log_mode == "qa" and assembled:
-                    if not _maybe_print_markdown(resp_id, "A", assembled, duration_ms=duration_ms):
+                    if not _maybe_print_markdown(resp_id, "A", assembled, duration_ms=duration_ms, usage=stream_usage):
                         logger.info("[%s] A:\n%s", resp_id, _truncate_for_log(assembled))
                 elif log_mode == "full" and assembled:
-                    if not _maybe_print_markdown(resp_id, "RESPONSE", assembled, duration_ms=duration_ms):
+                    if not _maybe_print_markdown(resp_id, "RESPONSE", assembled, duration_ms=duration_ms, usage=stream_usage):
                         logger.info("[%s] RESPONSE:\n%s", resp_id, _truncate_for_log(assembled))
 
         return StreamingResponse(sse_gen(), media_type="text/event-stream")
     except (asyncio.TimeoutError, TimeoutError):
+        error_msg = f"Request timed out after {settings.timeout_seconds}s"
         logger.error("[%s] error status=504 timeout_seconds=%d", resp_id, settings.timeout_seconds)
-        return _openai_error(f"codex exec timed out after {settings.timeout_seconds}s", status_code=504)
+        _request_stats.record_failure()
+        _print_error_panel(resp_id, error_msg, 504)
+        return _openai_error(error_msg, status_code=504)
     except HTTPException:
         # Let FastAPI handle already-structured HTTP errors (auth, validation, etc.).
+        _request_stats.record_failure()
         raise
     except Exception as e:
         upstream = _extract_upstream_status_code(e)
         status = upstream or 500
-        logger.error("[%s] error status=%d %s", resp_id, status, _truncate_for_log(str(e)))
-        return _openai_error(str(e), status_code=status)
+        error_msg = str(e)
+        logger.error("[%s] error status=%d %s", resp_id, status, _truncate_for_log(error_msg))
+        _request_stats.record_failure()
+        _print_error_panel(resp_id, error_msg, status)
+        return _openai_error(error_msg, status_code=status)
