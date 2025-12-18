@@ -151,6 +151,7 @@ def _apply_preset() -> None:
         "gemini-cloudcode": {
             "CODEX_PROVIDER": "gemini",
             "GEMINI_USE_CLOUDCODE_API": "1",
+            "GEMINI_MODEL": "gemini-3-flash-preview",
             "CODEX_LOG_MODE": "qa",
             "CODEX_LOG_MAX_CHARS": "4000",
             "CODEX_LOG_EVENTS": "0",
@@ -226,6 +227,7 @@ def _apply_preset_env() -> None:
         "gemini-cloudcode": {
             "CODEX_PROVIDER": "gemini",
             "GEMINI_USE_CLOUDCODE_API": "1",
+            "GEMINI_MODEL": "gemini-3-flash-preview",
             "CODEX_LOG_MODE": "qa",
         },
     }

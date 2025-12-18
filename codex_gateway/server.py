@@ -138,7 +138,7 @@ def _provider_default_model(provider: str) -> str | None:
     if provider == "claude":
         return settings.claude_model or "sonnet"
     if provider == "gemini":
-        return settings.gemini_model or "gemini-2.5-pro"
+        return settings.gemini_model or "gemini-3-flash-preview"
     return None
 
 
@@ -925,7 +925,7 @@ async def chat_completions(
                                     fallback_text = evt["result"]
                             text = assembler.text or (fallback_text or "")
                     elif provider == "gemini":
-                        gemini_model = provider_model or settings.gemini_model or "gemini-2.5-pro"
+                        gemini_model = provider_model or settings.gemini_model or "gemini-3-flash-preview"
                         if use_gemini_cloudcode:
                             if settings.log_events:
                                 logger.info(
@@ -1164,7 +1164,7 @@ async def chat_completions(
                                     stderr_callback=_stderr_log,
                                 )
                         elif provider == "gemini":
-                            gemini_model = provider_model or settings.gemini_model or "gemini-2.5-pro"
+                            gemini_model = provider_model or settings.gemini_model or "gemini-3-flash-preview"
                             if use_gemini_cloudcode:
                                 if settings.log_events:
                                     logger.info(

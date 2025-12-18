@@ -200,6 +200,7 @@ Supported presets:
 - `autoglm-phone`
 - `cursor-fast` (default for `cursor-agent`)
 - `cursor-auto`
+- `gemini-cloudcode` (defaults to `gemini-3-flash-preview`)
 - `claude-oauth`
 - `gemini-cloudcode`
 
