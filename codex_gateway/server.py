@@ -67,6 +67,7 @@ if settings.cors_origins.strip():
 
 
 _semaphore = None
+_active_requests = 0  # Track current concurrent requests
 
 
 def _get_semaphore():
@@ -76,6 +77,11 @@ def _get_semaphore():
 
         _semaphore = asyncio.Semaphore(settings.max_concurrency)
     return _semaphore
+
+
+def _get_active_requests() -> int:
+    """Get current number of active requests."""
+    return _active_requests
 
 
 def _extract_reasoning_effort(req: ChatCompletionRequest) -> str | None:
@@ -417,7 +423,7 @@ def _print_error_panel(resp_id: str, error_msg: str, status_code: int = 500) -> 
     ))
 
 
-def _print_separator(resp_id: str, label: str = "REQUEST") -> None:
+def _print_separator(resp_id: str, label: str = "REQUEST", *, model: str | None = None) -> None:
     """Print a visual separator for new requests."""
     try:
         from rich.console import Console
@@ -431,7 +437,17 @@ def _print_separator(resp_id: str, label: str = "REQUEST") -> None:
     
     console: Console = _RICH_CONSOLE  # type: ignore[assignment]
     short = _short_id(resp_id)
-    console.print(Rule(f"🔷 {label} [{short}]", style="bold blue"))
+    active = _get_active_requests()
+    
+    # Build label with context
+    parts = [f"🔷 {label}"]
+    if model:
+        parts.append(f"model={model}")
+    parts.append(f"[{short}]")
+    if active > 1:
+        parts.append(f"📥 {active} concurrent")
+    
+    console.print(Rule(" ".join(parts), style="bold blue"))
 
 
 _AUTOMATION_GUARD = """SYSTEM: IMPORTANT (Open-AutoGLM action mode)
@@ -790,22 +806,22 @@ async def chat_completions(
             effort_source = "request"
         elif not default_effort:
             effort_source = "fallback"
+        
+        # Track concurrent requests
+        global _active_requests
+        _active_requests += 1
+        
         # Print visual separator for easier request tracking
         if settings.log_render_markdown:
-            _print_separator(resp_id, f"{provider}/{mode_label}")
+            _print_separator(resp_id, f"{provider}/{mode_label}", model=resolved_model)
         
         logger.info(
-            "[%s] request model=%s resolved=%s provider=%s mode=%s stream=%s effort=%s images=%d client_model=%s ignored=%s",
+            "[%s] ▶ model=%s provider=%s mode=%s stream=%s",
             resp_id,
-            requested_model,
             resolved_model,
             provider,
             mode_label,
             req.stream,
-            reasoning_effort,
-            len(image_urls),
-            client_model or "<empty>",
-            client_model_ignored,
         )
         if settings.debug_log:
             eff = provider_model or _provider_default_model(provider) or "<default>"
@@ -1216,7 +1232,8 @@ async def chat_completions(
             usage_str = f" usage={usage}" if isinstance(usage, dict) else ""
             logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(text), usage_str)
             
-            # Record stats
+            # Record stats and decrement active count
+            _active_requests -= 1
             _request_stats.record_success(duration_ms, usage)
             _maybe_print_stats()
             
@@ -1617,7 +1634,8 @@ async def chat_completions(
                     usage_str,
                 )
                 
-                # Record stats
+                # Record stats and decrement active count
+                _active_requests -= 1
                 _request_stats.record_success(duration_ms, stream_usage)
                 _maybe_print_stats()
                 
@@ -1632,11 +1650,13 @@ async def chat_completions(
     except (asyncio.TimeoutError, TimeoutError):
         error_msg = f"Request timed out after {settings.timeout_seconds}s"
         logger.error("[%s] error status=504 timeout_seconds=%d", resp_id, settings.timeout_seconds)
+        _active_requests -= 1
         _request_stats.record_failure()
         _print_error_panel(resp_id, error_msg, 504)
         return _openai_error(error_msg, status_code=504)
     except HTTPException:
         # Let FastAPI handle already-structured HTTP errors (auth, validation, etc.).
+        _active_requests -= 1
         _request_stats.record_failure()
         raise
     except Exception as e:
@@ -1644,6 +1664,7 @@ async def chat_completions(
         status = upstream or 500
         error_msg = str(e)
         logger.error("[%s] error status=%d %s", resp_id, status, _truncate_for_log(error_msg))
+        _active_requests -= 1
         _request_stats.record_failure()
         _print_error_panel(resp_id, error_msg, status)
         return _openai_error(error_msg, status_code=status)
