@@ -7,10 +7,10 @@ Works great as a local gateway (localhost) or behind a reverse proxy.
 Think of it as **LiteLLM for agent CLIs**: you point existing OpenAI SDKs/tools at `base_url`, and choose a backend by `model`.
 
 Supported backends:
-- OpenAI Codex (defaults to backend `/responses` for vision; falls back to `codex exec`)
-- Cursor Agent CLI (`cursor-agent`)
-- Claude Code CLI (`claude`) or Claude OAuth direct (set `CLAUDE_USE_OAUTH_API=1`)
-- Gemini CLI (`gemini`) or Gemini CloudCode direct (set `GEMINI_USE_CLOUDCODE_API=1`)
+- **OpenAI Codex** - defaults to backend `/responses` for vision; falls back to `codex exec`
+- **Cursor Agent** - via `cursor-agent` CLI
+- **Claude Code** - via CLI or **direct API** (auto-detects `~/.claude/settings.json` config)
+- **Gemini** - via CLI or CloudCode direct (set `GEMINI_USE_CLOUDCODE_API=1`)
 
 Why this exists:
 - Many tools/SDKs only speak the OpenAI API (`/v1/chat/completions`) — this lets you plug agent CLIs into that ecosystem.
@@ -67,6 +67,7 @@ Notes:
 - If `CODEX_WORKSPACE` is unset, the gateway creates an empty temp workspace under `/tmp` (so you don't need to configure a repo path).
 - When you start with a fixed provider (e.g. `... gemini`), the client-sent `model` string is accepted but ignored by default (gateway uses the provider's default model).
 - Each provider still requires its own local CLI login state (no API key is required for Codex / Gemini CloudCode / Claude OAuth).
+- **Claude auto-detects** `~/.claude/settings.json` and uses direct API mode if `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` are configured.
 - `uv run agent-cli-to-api cursor-agent` defaults to Cursor Auto routing (`CURSOR_AGENT_MODEL=auto`). If you want faster responses, run with `--preset cursor-fast`.
 - When running in an interactive terminal (TTY), the gateway enables colored logs and Markdown rendering by default. To disable: `CODEX_RICH_LOGS=0` or `CODEX_LOG_RENDER_MARKDOWN=0`.
 
@@ -221,7 +222,22 @@ Supported presets:
 - `claude-oauth`
 - `gemini-cloudcode`
 
-### Claude OAuth direct (no API key)
+### Claude direct API (recommended)
+
+The gateway **auto-detects** your Claude CLI configuration from `~/.claude/settings.json`:
+
+```bash
+# If you have Claude CLI configured with a custom API endpoint (e.g. 小米 MiMo, 腾讯混元, etc.)
+# Just run - no extra config needed:
+uv run agent-cli-to-api claude
+```
+
+The gateway will automatically:
+1. Read `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from `~/.claude/settings.json`
+2. Use direct HTTP API calls (fast, ~0ms gateway overhead)
+3. Log timing breakdown: `auth_ms`, `prepare_ms`, `api_latency_ms`
+
+**Alternative: Claude OAuth (Anthropic official)**
 
 ```bash
 uv run python -m codex_gateway.claude_oauth_login
@@ -261,6 +277,33 @@ OpenAI-compatible API, chat completions, SSE streaming, agent gateway, CLI to AP
 
 You are exposing an agent that can read files and run commands depending on `CODEX_SANDBOX`.
 Keep it private by default, use a token, and run in an isolated environment when deploying.
+
+## Logging & Performance Diagnosis
+
+The gateway provides detailed timing logs to help diagnose latency:
+
+```
+INFO  claude-oauth request: url=https://api.example.com/v1/messages model=xxx auth_ms=0 prepare_ms=0
+INFO  claude-oauth response: status=200 api_latency_ms=2886 parse_ms=0 total_ms=2887
+```
+
+| Metric | Description |
+|--------|-------------|
+| `auth_ms` | Time to load/refresh credentials |
+| `prepare_ms` | Time to build request payload |
+| `api_latency_ms` | **Upstream API response time** (main bottleneck) |
+| `parse_ms` | Time to parse response |
+| `total_ms` | Total gateway processing time |
+
+If `api_latency_ms` ≈ `total_ms`, the latency is entirely from the upstream API (not the gateway).
+
+### Log modes
+
+```bash
+CODEX_LOG_MODE=summary  # one line per request (default)
+CODEX_LOG_MODE=qa       # show Q (question) and A (answer)
+CODEX_LOG_MODE=full     # full prompt + response
+```
 
 ## Performance notes (important)
 
