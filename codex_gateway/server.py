@@ -298,6 +298,9 @@ class RequestStats:
 _request_stats = RequestStats()
 _STATS_INTERVAL_SECONDS = 60  # Report every 60 seconds
 
+# Store pending questions for Q+A pairing in high concurrency
+_pending_questions: dict[str, str] = {}
+
 
 def _maybe_print_stats() -> None:
     """Print stats summary if interval has passed."""
@@ -404,6 +407,62 @@ def _maybe_print_markdown(
         title = f"[{short}] {label}"
     
     console.print(Panel(Markdown(payload), title=title, border_style=style, expand=False))
+    return True
+
+
+def _print_qa_together(
+    resp_id: str,
+    question: str,
+    answer: str,
+    *,
+    duration_ms: int | None = None,
+    usage: dict[str, int] | None = None,
+) -> bool:
+    """
+    Print Question and Answer together in a single grouped panel.
+    This ensures Q and A stay together even under high concurrency.
+    """
+    if not settings.log_render_markdown:
+        return False
+    if not question and not answer:
+        return False
+    try:
+        from rich.console import Console
+        from rich.markdown import Markdown
+        from rich.panel import Panel
+        from rich.console import Group
+    except Exception:
+        return False
+
+    global _RICH_CONSOLE
+    if _RICH_CONSOLE is None:
+        _RICH_CONSOLE = Console(stderr=True)
+
+    console: Console = _RICH_CONSOLE  # type: ignore[assignment]
+    short = _short_id(resp_id)
+    
+    # Prepare Q panel content
+    panel_limit = max(settings.log_max_chars * 10, 50000)
+    q_payload = question[:panel_limit] if len(question) > panel_limit else question
+    q_payload = q_payload.rstrip("\n")
+    q_title = f"📝 Question [{short}] 📏 {len(question):,} chars"
+    q_panel = Panel(Markdown(q_payload), title=q_title, border_style="cyan", expand=False)
+    
+    # Prepare A panel content
+    a_payload = answer[:panel_limit] if len(answer) > panel_limit else answer
+    a_payload = a_payload.rstrip("\n")
+    parts = [f"✅ Answer [{short}]"]
+    if duration_ms:
+        parts.append(f"⏱️ {duration_ms/1000:.1f}s")
+    if usage:
+        total = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+        if total > 0:
+            parts.append(f"🔢 {total:,} tokens")
+    a_title = " ".join(parts)
+    a_panel = Panel(Markdown(a_payload), title=a_title, border_style="green", expand=False)
+    
+    # Print both panels as a group (atomically)
+    console.print(Group(q_panel, a_panel))
     return True
 
 
@@ -918,8 +977,8 @@ async def chat_completions(
             
             q = "\n\n---\n\n".join(q_parts) if q_parts else ""
             if q:
-                if not _maybe_print_markdown(resp_id, "Q", q):
-                    logger.info("[%s] Q:\n%s", resp_id, _truncate_for_log(q))
+                # Store question for later pairing with answer (avoids interleaving in high concurrency)
+                _pending_questions[resp_id] = q
         elif log_mode == "full":
             logger.info("[%s] PROMPT:\n%s", resp_id, _truncate_for_log(prompt))
 
@@ -1321,17 +1380,23 @@ async def chat_completions(
             _maybe_print_stats()
             
             if log_mode == "qa" and text:
-                if not _maybe_print_markdown(resp_id, "A", text, duration_ms=duration_ms, usage=usage):
+                # Retrieve stored question and print Q+A together
+                stored_q = _pending_questions.pop(resp_id, "")
+                if not _print_qa_together(resp_id, stored_q, text, duration_ms=duration_ms, usage=usage):
                     # Fallback to plain logging
                     usage_str = f" usage={usage}" if isinstance(usage, dict) else ""
                     logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(text), usage_str)
+                    if stored_q:
+                        logger.info("[%s] Q:\n%s", resp_id, _truncate_for_log(stored_q))
                     logger.info("[%s] A:\n%s", resp_id, _truncate_for_log(text))
             elif log_mode == "full" and text:
+                _pending_questions.pop(resp_id, None)  # Clean up
                 if not _maybe_print_markdown(resp_id, "RESPONSE", text, duration_ms=duration_ms, usage=usage):
                     usage_str = f" usage={usage}" if isinstance(usage, dict) else ""
                     logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(text), usage_str)
                     logger.info("[%s] RESPONSE:\n%s", resp_id, _truncate_for_log(text))
             elif not settings.log_render_markdown:
+                _pending_questions.pop(resp_id, None)  # Clean up
                 # Only log summary when not using rich panels
                 usage_str = f" usage={usage}" if isinstance(usage, dict) else ""
                 logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(text), usage_str)
@@ -1724,16 +1789,22 @@ async def chat_completions(
                 _maybe_print_stats()
                 
                 if log_mode == "qa" and assembled:
-                    if not _maybe_print_markdown(resp_id, "A", assembled, duration_ms=duration_ms, usage=stream_usage):
+                    # Retrieve stored question and print Q+A together
+                    stored_q = _pending_questions.pop(resp_id, "")
+                    if not _print_qa_together(resp_id, stored_q, assembled, duration_ms=duration_ms, usage=stream_usage):
                         usage_str = f" usage={stream_usage}" if isinstance(stream_usage, dict) else ""
                         logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(assembled), usage_str)
+                        if stored_q:
+                            logger.info("[%s] Q:\n%s", resp_id, _truncate_for_log(stored_q))
                         logger.info("[%s] A:\n%s", resp_id, _truncate_for_log(assembled))
                 elif log_mode == "full" and assembled:
+                    _pending_questions.pop(resp_id, None)  # Clean up
                     if not _maybe_print_markdown(resp_id, "RESPONSE", assembled, duration_ms=duration_ms, usage=stream_usage):
                         usage_str = f" usage={stream_usage}" if isinstance(stream_usage, dict) else ""
                         logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(assembled), usage_str)
                         logger.info("[%s] RESPONSE:\n%s", resp_id, _truncate_for_log(assembled))
                 elif not settings.log_render_markdown:
+                    _pending_questions.pop(resp_id, None)  # Clean up
                     usage_str = f" usage={stream_usage}" if isinstance(stream_usage, dict) else ""
                     logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(assembled), usage_str)
 
@@ -1742,12 +1813,14 @@ async def chat_completions(
         error_msg = f"Request timed out after {settings.timeout_seconds}s"
         logger.error("[%s] error status=504 timeout_seconds=%d", resp_id, settings.timeout_seconds)
         _active_requests -= 1
+        _pending_questions.pop(resp_id, None)  # Clean up
         _request_stats.record_failure()
         _print_error_panel(resp_id, error_msg, 504)
         return _openai_error(error_msg, status_code=504)
     except HTTPException:
         # Let FastAPI handle already-structured HTTP errors (auth, validation, etc.).
         _active_requests -= 1
+        _pending_questions.pop(resp_id, None)  # Clean up
         _request_stats.record_failure()
         raise
     except Exception as e:
@@ -1756,6 +1829,7 @@ async def chat_completions(
         error_msg = str(e)
         logger.error("[%s] error status=%d %s", resp_id, status, _truncate_for_log(error_msg))
         _active_requests -= 1
+        _pending_questions.pop(resp_id, None)  # Clean up
         _request_stats.record_failure()
         _print_error_panel(resp_id, error_msg, status)
         return _openai_error(error_msg, status_code=status)
