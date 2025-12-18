@@ -229,7 +229,14 @@ def _truncate_for_log(text: str) -> str:
 _RICH_CONSOLE = None
 
 
-def _maybe_print_markdown(resp_id: str, label: str, text: str) -> bool:
+def _short_id(resp_id: str) -> str:
+    """Extract short ID from chatcmpl-xxx format."""
+    if resp_id.startswith("chatcmpl-"):
+        return resp_id[9:17]  # First 8 chars after prefix
+    return resp_id[:8]
+
+
+def _maybe_print_markdown(resp_id: str, label: str, text: str, *, duration_ms: int | None = None) -> bool:
     """
     Best-effort: render markdown to the terminal for easier reading.
     Returns True if rendered (so callers can skip duplicate plain logging).
@@ -253,17 +260,19 @@ def _maybe_print_markdown(resp_id: str, label: str, text: str) -> bool:
 
     console: Console = _RICH_CONSOLE  # type: ignore[assignment]
     payload = _truncate_for_log(text).rstrip("\n")
+    short = _short_id(resp_id)
     
     # Use different styles for Q vs A
     if label == "Q":
         style = "cyan"
-        title = f"📝 [{resp_id}] Question"
+        title = f"📝 Question [{short}]"
     elif label == "A":
         style = "green"
-        title = f"✅ [{resp_id}] Answer"
+        duration_str = f" ⏱️ {duration_ms/1000:.1f}s" if duration_ms else ""
+        title = f"✅ Answer [{short}]{duration_str}"
     else:
         style = "blue"
-        title = f"[{resp_id}] {label}"
+        title = f"[{short}] {label}"
     
     console.print(Panel(Markdown(payload), title=title, border_style=style, expand=False))
     return True
@@ -282,7 +291,8 @@ def _print_separator(resp_id: str, label: str = "REQUEST") -> None:
         _RICH_CONSOLE = Console(stderr=True)
     
     console: Console = _RICH_CONSOLE  # type: ignore[assignment]
-    console.print(Rule(f"🔷 {label} {resp_id}", style="bold blue"))
+    short = _short_id(resp_id)
+    console.print(Rule(f"🔷 {label} [{short}]", style="bold blue"))
 
 
 _AUTOMATION_GUARD = """SYSTEM: IMPORTANT (Open-AutoGLM action mode)
@@ -409,6 +419,14 @@ def _materialize_request_images(
 @app.on_event("startup")
 async def _log_startup_config() -> None:
     # Intentionally omit secrets (tokens, API keys).
+    from .claude_oauth import get_claude_cli_config
+    
+    # Check for Claude CLI config to show actual endpoint
+    cli_config = get_claude_cli_config()
+    claude_effective_url = cli_config.base_url or settings.claude_api_base_url
+    claude_effective_model = cli_config.default_model or settings.claude_model
+    claude_source = "CLI settings.json" if cli_config.base_url else "default"
+    
     items: list[tuple[str, object]] = [
         ("workspace", settings.workspace),
         ("provider", settings.provider),
@@ -423,10 +441,9 @@ async def _log_startup_config() -> None:
         ("strip_answer_tags", settings.strip_answer_tags),
         ("debug_log", settings.debug_log),
         ("cursor_agent_model", settings.cursor_agent_model or "auto"),
-        ("claude_model", settings.claude_model),
+        ("claude_model", claude_effective_model),
         ("claude_use_oauth_api", settings.claude_use_oauth_api),
-        ("claude_api_base_url", settings.claude_api_base_url),
-        ("claude_oauth_base_url", settings.claude_oauth_base_url),
+        ("claude_effective_url", f"{claude_effective_url} ({claude_source})"),
         ("claude_oauth_creds_path", settings.claude_oauth_creds_path),
         ("gemini_model", settings.gemini_model),
         ("gemini_use_cloudcode_api", settings.gemini_use_cloudcode_api),
@@ -1060,7 +1077,7 @@ async def chat_completions(
             usage_str = f" usage={usage}" if isinstance(usage, dict) else ""
             logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(text), usage_str)
             if log_mode == "qa" and text:
-                if not _maybe_print_markdown(resp_id, "A", text):
+                if not _maybe_print_markdown(resp_id, "A", text, duration_ms=duration_ms):
                     logger.info("[%s] A:\n%s", resp_id, _truncate_for_log(text))
             elif log_mode == "full" and text:
                 if not _maybe_print_markdown(resp_id, "RESPONSE", text):
@@ -1456,10 +1473,10 @@ async def chat_completions(
                     usage_str,
                 )
                 if log_mode == "qa" and assembled:
-                    if not _maybe_print_markdown(resp_id, "A", assembled):
+                    if not _maybe_print_markdown(resp_id, "A", assembled, duration_ms=duration_ms):
                         logger.info("[%s] A:\n%s", resp_id, _truncate_for_log(assembled))
                 elif log_mode == "full" and assembled:
-                    if not _maybe_print_markdown(resp_id, "RESPONSE", assembled):
+                    if not _maybe_print_markdown(resp_id, "RESPONSE", assembled, duration_ms=duration_ms):
                         logger.info("[%s] RESPONSE:\n%s", resp_id, _truncate_for_log(assembled))
 
         return StreamingResponse(sse_gen(), media_type="text/event-stream")
