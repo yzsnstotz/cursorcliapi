@@ -63,6 +63,14 @@ Custom bind host/port:
 uv run agent-cli-to-api codex --host 127.0.0.1 --port 8000
 ```
 
+Log request curl commands (optional):
+
+```bash
+uv run agent-cli-to-api codex curl
+# or
+uv run agent-cli-to-api codex --log-curl
+```
+
 Notes:
 - If `CODEX_WORKSPACE` is unset, the gateway creates an empty temp workspace under `/tmp` (so you don't need to configure a repo path).
 - When you start with a fixed provider (e.g. `... gemini`), the client-sent `model` string is accepted but ignored by default (gateway uses the provider's default model).
@@ -111,6 +119,7 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
 curl -N http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer devtoken" \
+  -H "X-Codex-Session-Id: 0f3d5b6f-2a3b-4d78-9f50-123456789abc" \
   -d '{
     "model":"gpt-5-codex",
     "messages":[{"role":"user","content":"用一句话解释这个项目的目的"}],
@@ -206,6 +215,13 @@ export CODEX_LOG_RENDER_MARKDOWN=1
 uv run agent-cli-to-api codex
 ```
 
+Log request curl commands (useful for replay/debug):
+
+```bash
+export CODEX_LOG_REQUEST_CURL=1
+uv run agent-cli-to-api codex
+```
+
 ### Presets
 
 ```bash
@@ -221,6 +237,10 @@ Supported presets:
 - `gemini-cloudcode` (defaults to `gemini-3-flash-preview`)
 - `claude-oauth`
 - `gemini-cloudcode`
+
+### Codex backend options
+
+- `CODEX_CODEX_ALLOW_TOOLS=1` to allow Codex backend tool calls (default: disabled).
 
 ### Claude direct API (recommended)
 

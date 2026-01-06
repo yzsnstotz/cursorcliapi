@@ -375,6 +375,7 @@ class Settings:
         "CODEX_CODEX_USER_AGENT",
         "codex_cli_rs/0.50.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464",
     )
+    codex_allow_tools: bool = _env_bool("CODEX_CODEX_ALLOW_TOOLS", False)
 
     # Optional other agent CLIs (multi-provider).
     # Provider routing:

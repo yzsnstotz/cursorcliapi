@@ -60,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Provider to use: codex|gemini|claude|cursor-agent (or `doctor`).",
     )
     parser.add_argument(
+        "mode",
+        nargs="?",
+        default=None,
+        help="Optional mode: curl (log request curl commands).",
+    )
+    parser.add_argument(
         "--host",
         default=os.environ.get("CODEX_HOST", "127.0.0.1"),
         help="Bind host (default: 127.0.0.1).",
@@ -79,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--log-level",
         default=os.environ.get("CODEX_LOG_LEVEL", "info"),
         help="Uvicorn log level (default: info).",
+    )
+    parser.add_argument(
+        "--log-curl",
+        action="store_true",
+        help="Log copy-pastable curl commands for incoming requests.",
     )
     parser.add_argument(
         "--env-file",
@@ -121,6 +132,15 @@ def main(argv: list[str] | None = None) -> None:
     provider_raw = (args.provider or "").strip().lower()
     if args.provider and not normalized_provider and provider_raw != "doctor":
         raise SystemExit(f"Unknown provider: {args.provider}")
+
+    mode_raw = (args.mode or "").strip().lower()
+    if mode_raw:
+        if mode_raw == "curl":
+            os.environ.setdefault("CODEX_LOG_REQUEST_CURL", "1")
+        else:
+            raise SystemExit(f"Unknown mode: {args.mode}")
+    if args.log_curl:
+        os.environ.setdefault("CODEX_LOG_REQUEST_CURL", "1")
 
     if normalized_provider:
         os.environ["CODEX_PROVIDER"] = normalized_provider
@@ -167,6 +187,8 @@ def main(argv: list[str] | None = None) -> None:
     if sys.stderr.isatty():
         os.environ.setdefault("CODEX_RICH_LOGS", "1")
         os.environ.setdefault("CODEX_LOG_RENDER_MARKDOWN", "1")
+        os.environ.setdefault("CODEX_LOG_STREAM_INLINE", "1")
+        os.environ.setdefault("CODEX_LOG_STREAM_INLINE_SUPPRESS_FINAL", "0")
 
     if provider_raw == "doctor":
         import asyncio

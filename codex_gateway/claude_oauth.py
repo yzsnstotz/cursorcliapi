@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from .config import settings
 from .http_client import get_async_client, request_json_with_retries
 from .openai_compat import ChatCompletionRequest, ChatMessage
@@ -364,7 +366,11 @@ async def generate_oauth(
     )
     
     t_response = time.time()
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError:
+        await _log_upstream_error(resp=resp, url=url, model_name=model_name, stream=False)
+        raise
     data = resp.json()
     
     t_parse = time.time()
@@ -434,6 +440,99 @@ def _extract_stream_usage(obj: Any) -> dict[str, int] | None:
     return None
 
 
+def _pick_header(headers: httpx.Headers, *names: str) -> str | None:
+    for name in names:
+        value = headers.get(name)
+        if value:
+            return value
+    return None
+
+
+def _truncate_log_text(text: str, *, max_len: int = 600) -> str:
+    cleaned = text.replace("\r", "").replace("\n", "\\n")
+    if len(cleaned) > max_len:
+        return f"{cleaned[:max_len]}... (len={len(cleaned)})"
+    return cleaned
+
+
+async def _summarize_error_body(resp: httpx.Response) -> str | None:
+    try:
+        if not resp.is_closed:
+            await resp.aread()
+    except Exception:
+        pass
+    body: str | None = None
+    try:
+        payload = resp.json()
+    except Exception:
+        try:
+            text = resp.text
+        except Exception:
+            return None
+        body = text if text else None
+    else:
+        if isinstance(payload, dict):
+            err = payload.get("error")
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("type")
+                if isinstance(msg, str) and msg:
+                    body = msg
+                else:
+                    body = json.dumps(err, ensure_ascii=True)
+            elif isinstance(err, str):
+                body = err
+            elif isinstance(payload.get("message"), str):
+                body = payload["message"]
+        if body is None:
+            body = json.dumps(payload, ensure_ascii=True)
+    if not body:
+        return None
+    return _truncate_log_text(body)
+
+
+def _summarize_rate_limit_headers(headers: httpx.Headers) -> str | None:
+    retry_after = headers.get("retry-after")
+    request_id = _pick_header(headers, "x-request-id", "request-id", "anthropic-request-id")
+    limit = headers.get("x-ratelimit-limit")
+    remaining = headers.get("x-ratelimit-remaining")
+    reset = headers.get("x-ratelimit-reset")
+    parts: list[str] = []
+    if retry_after:
+        parts.append(f"retry_after={retry_after}")
+    if request_id:
+        parts.append(f"request_id={request_id}")
+    rate_parts: list[str] = []
+    if limit:
+        rate_parts.append(f"limit={limit}")
+    if remaining:
+        rate_parts.append(f"remaining={remaining}")
+    if reset:
+        rate_parts.append(f"reset={reset}")
+    if rate_parts:
+        parts.append(f"rate_limit({', '.join(rate_parts)})")
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
+async def _log_upstream_error(
+    *,
+    resp: httpx.Response,
+    url: str,
+    model_name: str,
+    stream: bool,
+) -> None:
+    status = resp.status_code
+    mode = "stream" if stream else "request"
+    logger.error("claude-oauth upstream error: mode=%s status=%d url=%s model=%s", mode, status, url, model_name)
+    header_summary = _summarize_rate_limit_headers(resp.headers)
+    if header_summary:
+        logger.error("claude-oauth upstream headers: %s", header_summary)
+    body_summary = await _summarize_error_body(resp)
+    if body_summary:
+        logger.error("claude-oauth upstream body: %s", body_summary)
+
+
 async def iter_oauth_stream_events(
     *,
     req: ChatCompletionRequest,
@@ -479,7 +578,11 @@ async def iter_oauth_stream_events(
     usage: dict[str, int] | None = None
     client = await get_async_client("claude-stream")
     async with client.stream("POST", url, json=payload, headers=headers, timeout=settings.timeout_seconds) as resp:
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            await _log_upstream_error(resp=resp, url=url, model_name=model_name, stream=True)
+            raise
         async for _, data in _iter_sse_events(resp):
                 if not data or data.strip() == "[DONE]":
                     continue

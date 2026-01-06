@@ -25,6 +25,7 @@ from .codex_responses import (
     build_codex_headers,
     collect_codex_responses_text_and_usage,
     convert_chat_completions_to_codex_responses,
+    extract_codex_usage_headers,
     iter_codex_responses_events,
     load_codex_auth,
     maybe_refresh_codex_auth,
@@ -133,6 +134,27 @@ def _extract_reasoning_effort(req: ChatCompletionRequest) -> str | None:
             effort = reasoning.get("effort")
             if isinstance(effort, str) and effort.strip():
                 return effort.strip()
+    return None
+
+
+def _extract_codex_session_id(req: ChatCompletionRequest, request: Request) -> str | None:
+    header_names = (
+        "x-codex-session-id",
+        "x-session-id",
+        "session-id",
+        "session_id",
+    )
+    for name in header_names:
+        value = request.headers.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:128]
+
+    extra = getattr(req, "model_extra", None) or {}
+    if isinstance(extra, dict):
+        for key in ("session_id", "sessionId", "codex_session_id", "codexSessionId"):
+            value = extra.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:128]
     return None
 
 
@@ -1146,6 +1168,15 @@ async def responses(
 
     result = await chat_completions(chat_req, request, authorization)
     if isinstance(result, (JSONResponse, StreamingResponse)):
+        if isinstance(result, JSONResponse) and result.status_code < 400:
+            try:
+                body = json.loads(result.body.decode("utf-8"))
+            except Exception:
+                return result
+            if isinstance(body, dict) and body.get("object") == "chat.completion":
+                converted = _chat_completion_to_responses(body)
+                headers = extract_codex_usage_headers(result.headers)
+                return JSONResponse(content=converted, headers=headers)
         return result
     if isinstance(result, dict):
         return _chat_completion_to_responses(result)
@@ -1210,6 +1241,9 @@ async def chat_completions(
     prompt = _maybe_inject_automation_guard(messages_to_prompt(req.messages))
     if len(prompt) > settings.max_prompt_chars:
         return _openai_error(f"Prompt too large ({len(prompt)} chars)", status_code=413)
+
+    codex_session_id = _extract_codex_session_id(req, request)
+    codex_response_headers: dict[str, str] = {}
 
     created = int(time.time())
     resp_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -1357,6 +1391,11 @@ async def chat_completions(
                         logger.info("[%s] image[%d] ext=%s bytes=%d", resp_id, idx, ext, size)
                     logger.info("[%s] decoded_images=%d", resp_id, len(image_files))
 
+        def _capture_codex_headers(headers: dict[str, str]) -> None:
+            if not headers:
+                return
+            codex_response_headers.update(extract_codex_usage_headers(headers))
+
         def _evt_log(evt: dict) -> None:
             if not settings.log_events:
                 return
@@ -1483,6 +1522,7 @@ async def chat_completions(
                                 headers = build_codex_headers(
                                     token=token,
                                     account_id=auth.account_id,
+                                    session_id=codex_session_id,
                                     version=settings.codex_responses_version,
                                     user_agent=settings.codex_responses_user_agent,
                                 )
@@ -1496,6 +1536,7 @@ async def chat_completions(
                                     reasoning_effort_override=(
                                         "high" if reasoning_effort == "xhigh" else reasoning_effort
                                     ),
+                                    allow_tools=settings.codex_allow_tools,
                                 )
                                 events = iter_codex_responses_events(
                                     base_url=settings.codex_responses_base_url,
@@ -1503,6 +1544,7 @@ async def chat_completions(
                                     payload=payload,
                                     timeout_seconds=settings.timeout_seconds,
                                     event_callback=_evt_log if settings.log_events else None,
+                                    response_headers_cb=_capture_codex_headers,
                                 )
                                 text, usage = await collect_codex_responses_text_and_usage(events)
                                 # Re-wrap usage into the same shape as codex exec path.
@@ -1758,6 +1800,8 @@ async def chat_completions(
             }
             if usage is not None:
                 response["usage"] = usage
+            if codex_response_headers:
+                return JSONResponse(content=response, headers=codex_response_headers)
             return response
 
         async def sse_gen():
@@ -1807,6 +1851,7 @@ async def chat_completions(
                                 headers = build_codex_headers(
                                     token=token,
                                     account_id=auth.account_id,
+                                    session_id=codex_session_id,
                                     version=settings.codex_responses_version,
                                     user_agent=settings.codex_responses_user_agent,
                                 )
@@ -1823,6 +1868,7 @@ async def chat_completions(
                                     reasoning_effort_override=(
                                         "high" if reasoning_effort == "xhigh" else reasoning_effort
                                     ),
+                                    allow_tools=settings.codex_allow_tools,
                                 )
                                 events = iter_codex_responses_events(
                                     base_url=settings.codex_responses_base_url,
@@ -2178,7 +2224,8 @@ async def chat_completions(
                     usage_str = f" usage={stream_usage}" if isinstance(stream_usage, dict) else ""
                     logger.info("[%s] response status=200 duration_ms=%d chars=%d%s", resp_id, duration_ms, len(assembled), usage_str)
 
-        return StreamingResponse(sse_gen(), media_type="text/event-stream")
+        stream_headers = codex_response_headers if codex_response_headers else None
+        return StreamingResponse(sse_gen(), media_type="text/event-stream", headers=stream_headers)
     except (asyncio.TimeoutError, TimeoutError):
         error_msg = f"Request timed out after {settings.timeout_seconds}s"
         logger.error("[%s] error status=504 timeout_seconds=%d", resp_id, settings.timeout_seconds)

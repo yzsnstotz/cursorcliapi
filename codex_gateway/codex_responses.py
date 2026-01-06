@@ -7,7 +7,7 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, Mapping
 
 import httpx
 
@@ -168,6 +168,7 @@ def build_codex_headers(
     *,
     token: str,
     account_id: str | None,
+    session_id: str | None = None,
     version: str = _DEFAULT_CODEX_VERSION,
     user_agent: str = _DEFAULT_CODEX_USER_AGENT,
 ) -> dict[str, str]:
@@ -179,13 +180,22 @@ def build_codex_headers(
         "Connection": "Keep-Alive",
         "Version": version,
         "Openai-Beta": "responses=experimental",
-        "Session_id": str(uuid.uuid4()),
+        "Session_id": session_id or str(uuid.uuid4()),
         "User-Agent": user_agent,
     }
     if account_id:
         headers["Originator"] = "codex_cli_rs"
         headers["Chatgpt-Account-Id"] = account_id
     return headers
+
+
+def extract_codex_usage_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key, value in headers.items():
+        lower = key.lower()
+        if lower.startswith("x-codex-") or lower == "x-request-id":
+            out[key] = value
+    return out
 
 
 def _prompt_dir() -> Path:
@@ -234,6 +244,7 @@ def convert_chat_completions_to_codex_responses(
     model_name: str,
     force_stream: bool,
     reasoning_effort_override: str | None = None,
+    allow_tools: bool = False,
 ) -> dict[str, Any]:
     instructions = codex_instructions_for_model(model_name)
 
@@ -261,12 +272,13 @@ def convert_chat_completions_to_codex_responses(
     if effort not in {"low", "medium", "high"}:
         effort = "medium"
     out["reasoning"] = {"effort": effort, "summary": "auto"}
-    # For proxying chat completions / UI automation, we generally want pure text output.
-    # Codex backend can otherwise attempt MCP/tool calls (which are not available here),
-    # leading to noisy logs and occasional refusals. Users who need tools should use
-    # `codex exec` via this gateway instead.
-    out["tool_choice"] = "none"
-    out["parallel_tool_calls"] = False
+    if not allow_tools:
+        # For proxying chat completions / UI automation, we generally want pure text output.
+        # Codex backend can otherwise attempt MCP/tool calls (which are not available here),
+        # leading to noisy logs and occasional refusals. Users who need tools should use
+        # `codex exec` via this gateway instead.
+        out["tool_choice"] = "none"
+        out["parallel_tool_calls"] = False
     out["include"] = ["reasoning.encrypted_content"]
 
     for message in req.messages:
@@ -329,6 +341,7 @@ async def iter_codex_responses_events(
     payload: dict[str, Any],
     timeout_seconds: int,
     event_callback: Callable[[dict[str, Any]], None] | None = None,
+    response_headers_cb: Callable[[dict[str, str]], None] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     url = base_url.rstrip("/") + "/responses"
     async with httpx.AsyncClient(timeout=None) as client:
@@ -339,6 +352,11 @@ async def iter_codex_responses_events(
                 if msg:
                     raise RuntimeError(f"codex responses failed: {resp.status_code}: {msg}")
                 raise RuntimeError(f"codex responses failed: {resp.status_code}")
+            if response_headers_cb is not None:
+                try:
+                    response_headers_cb(dict(resp.headers))
+                except Exception:
+                    pass
 
             async for line in resp.aiter_lines():
                 if not line:
