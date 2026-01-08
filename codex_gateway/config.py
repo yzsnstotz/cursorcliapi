@@ -375,7 +375,7 @@ class Settings:
         "CODEX_CODEX_USER_AGENT",
         "codex_cli_rs/0.50.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464",
     )
-    codex_allow_tools: bool = _env_bool("CODEX_CODEX_ALLOW_TOOLS", False)
+    codex_allow_tools: bool = _env_bool("CODEX_CODEX_ALLOW_TOOLS", True)
 
     # Optional other agent CLIs (multi-provider).
     # Provider routing:
@@ -465,7 +465,7 @@ class Settings:
     # - full: include full prompt text + full assistant output
     log_mode: str = _env_str("CODEX_LOG_MODE", "").strip().lower()
     debug_log: bool = _env_bool("CODEX_DEBUG_LOG", False)
-    log_events: bool = _env_bool("CODEX_LOG_EVENTS", False)
+    log_events: bool = _env_bool("CODEX_LOG_EVENTS", True)
     log_max_chars: int = _env_int("CODEX_LOG_MAX_CHARS", 4000)
     rich_logs: bool = _env_bool("CODEX_RICH_LOGS", False)
     log_render_markdown: bool = _env_bool("CODEX_LOG_RENDER_MARKDOWN", False)

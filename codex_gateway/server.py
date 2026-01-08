@@ -389,34 +389,83 @@ def _is_simple_value(value: object) -> bool:
     return isinstance(value, (str, int, float, bool)) or value is None
 
 
-def _format_request_value(value: object, *, max_len: int = 160) -> str:
-    if _is_simple_value(value):
-        try:
-            text = json.dumps(value, ensure_ascii=True)
-        except Exception:
-            text = repr(value)
-    elif isinstance(value, list):
-        if len(value) <= 6 and all(_is_simple_value(v) for v in value):
-            try:
-                text = json.dumps(value, ensure_ascii=True)
-            except Exception:
-                text = repr(value)
-        else:
-            text = f"list(len={len(value)})"
-    elif isinstance(value, dict):
-        keys = list(value.keys())
-        if len(keys) <= 6 and all(_is_simple_value(value[k]) for k in keys):
-            try:
-                text = json.dumps(value, ensure_ascii=True)
-            except Exception:
-                text = repr(value)
-        else:
-            preview = ", ".join(str(k) for k in keys[:6])
-            if len(keys) > 6:
-                preview += ", ..."
-            text = f"dict(keys={len(keys)}: {preview})"
+def _tool_label(tool: dict[str, object]) -> str | None:
+    tool_type = tool.get("type")
+    name = None
+    if isinstance(tool.get("name"), str):
+        name = tool["name"]
     else:
-        text = repr(value)
+        func = tool.get("function")
+        if isinstance(func, dict) and isinstance(func.get("name"), str):
+            name = func["name"]
+    if name is None and isinstance(tool.get("tool"), str):
+        name = tool["tool"]
+    if name is None and isinstance(tool.get("id"), str):
+        name = tool["id"]
+    if isinstance(tool_type, str) and name:
+        if tool_type == "mcp" and isinstance(tool.get("server"), str):
+            return f"{tool_type}:{tool['server']}/{name}"
+        return f"{tool_type}:{name}"
+    if isinstance(tool_type, str):
+        return tool_type
+    return name
+
+
+def _summarize_tools(value: object, *, max_items: int = 8) -> str | None:
+    if not isinstance(value, list):
+        return None
+    labels: list[str] = []
+    for tool in value:
+        if not isinstance(tool, dict):
+            continue
+        label = _tool_label(tool)
+        if label:
+            labels.append(label)
+    if not labels:
+        return None
+    if len(labels) > max_items:
+        labels = labels[:max_items] + ["..."]
+    return f"[{', '.join(labels)}]"
+
+
+def _format_request_value(key: str, value: object, *, max_len: int = 160) -> str:
+    if key in {"tools", "functions"}:
+        summary = _summarize_tools(value)
+        if summary is not None:
+            text = summary
+        else:
+            text = ""
+    else:
+        text = ""
+
+    if not text:
+        if _is_simple_value(value):
+            try:
+                text = json.dumps(value, ensure_ascii=True)
+            except Exception:
+                text = repr(value)
+        elif isinstance(value, list):
+            if len(value) <= 6 and all(_is_simple_value(v) for v in value):
+                try:
+                    text = json.dumps(value, ensure_ascii=True)
+                except Exception:
+                    text = repr(value)
+            else:
+                text = f"list(len={len(value)})"
+        elif isinstance(value, dict):
+            keys = list(value.keys())
+            if len(keys) <= 6 and all(_is_simple_value(value[k]) for k in keys):
+                try:
+                    text = json.dumps(value, ensure_ascii=True)
+                except Exception:
+                    text = repr(value)
+            else:
+                preview = ", ".join(str(k) for k in keys[:6])
+                if len(keys) > 6:
+                    preview += ", ..."
+                text = f"dict(keys={len(keys)}: {preview})"
+        else:
+            text = repr(value)
 
     text = text.replace("\r", "").replace("\n", "\\n").replace("`", "'")
     if len(text) > max_len:
@@ -498,12 +547,12 @@ def _format_request_metadata(
         seen = set()
         for key in preferred:
             if key in extra and key not in skip:
-                extra_items.append((key, _format_request_value(extra[key])))
+                extra_items.append((key, _format_request_value(key, extra[key])))
                 seen.add(key)
         for key in sorted(extra.keys()):
             if key in skip or key in seen:
                 continue
-            extra_items.append((key, _format_request_value(extra[key])))
+            extra_items.append((key, _format_request_value(key, extra[key])))
 
     md_lines = ["### Core"]
     for key, value in items:
