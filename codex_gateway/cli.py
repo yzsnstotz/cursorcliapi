@@ -68,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--host",
         default=os.environ.get("CODEX_HOST", "127.0.0.1"),
-        help="Bind host (default: 127.0.0.1).",
+        help="Bind host (default: 0.0.0.0).",
     )
     parser.add_argument(
         "--port",

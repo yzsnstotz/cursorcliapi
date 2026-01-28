@@ -326,7 +326,7 @@ def _env_json_dict_str_str(name: str) -> dict[str, str]:
 
 @dataclass(frozen=True)
 class Settings:
-    host: str = os.environ.get("CODEX_GATEWAY_HOST", "127.0.0.1")
+    host: str = os.environ.get("CODEX_GATEWAY_HOST", "0.0.0.0")
     port: int = _env_int("CODEX_GATEWAY_PORT", 8000)
 
     # If set, requests must include `Authorization: Bearer <token>`.
