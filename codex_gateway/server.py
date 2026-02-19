@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 import tempfile
 import threading
@@ -63,6 +64,10 @@ from .stream_json_cli import (
 
 app = FastAPI(title="agent-cli-to-api", version="0.1.0")
 logger = logging.getLogger("uvicorn.error")
+logger.info(
+    "gateway auth: bearer_token=%s",
+    "SET" if settings.bearer_token else "NOT_SET",
+)
 
 if settings.cors_origins.strip():
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
@@ -237,6 +242,39 @@ def _check_auth(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Missing Authorization: Bearer <token>")
     if authorization.removeprefix("Bearer ").strip() != token:
         raise HTTPException(status_code=403, detail="Invalid token")
+
+
+def _resolve_cursor_agent_bin() -> str:
+    """Resolve cursor-agent executable; raise clear error if not found."""
+    bin_name = settings.cursor_agent_bin
+    if os.path.sep in bin_name or (os.path.altsep and os.path.altsep in bin_name):
+        if os.path.isfile(bin_name) and os.access(bin_name, os.X_OK):
+            return bin_name
+        raise FileNotFoundError(
+            f"cursor-agent binary not found at {bin_name!r}. "
+            "Set CURSOR_AGENT_BIN to a valid path or ensure cursor-agent is in PATH."
+        )
+    # Try shutil.which first (respects PATH)
+    resolved = shutil.which(bin_name)
+    if resolved:
+        return resolved
+    # Fallback: check common installation paths when PATH doesn't include them
+    # (e.g., launchd services have limited PATH)
+    home = os.path.expanduser("~")
+    common_paths = [
+        os.path.join(home, ".local", "bin", bin_name),
+        os.path.join(home, "bin", bin_name),
+        os.path.join("/usr", "local", "bin", bin_name),
+        os.path.join("/opt", "homebrew", "bin", bin_name),  # macOS Homebrew on Apple Silicon
+    ]
+    for candidate in common_paths:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    raise FileNotFoundError(
+        f"cursor-agent binary {bin_name!r} not found in PATH or common locations. "
+        f"Checked: PATH, ~/.local/bin/{bin_name}, ~/bin/{bin_name}, /usr/local/bin/{bin_name}, /opt/homebrew/bin/{bin_name}. "
+        "Install the cursor-agent CLI or set CURSOR_AGENT_BIN to its full path."
+    )
 
 
 def _openai_error(message: str, *, status_code: int = 500) -> JSONResponse:
@@ -1657,13 +1695,16 @@ async def chat_completions(
                             src = "request" if provider_model else ("env" if settings.cursor_agent_model else "default")
                             logger.info("[%s] cursor-agent model=%s model_src=%s", resp_id, cursor_model, src)
                         cursor_workspace = settings.cursor_agent_workspace or settings.workspace
+                        cursor_bin = _resolve_cursor_agent_bin()
+                        os.makedirs(cursor_workspace, exist_ok=True)
                         cmd = [
-                            settings.cursor_agent_bin,
+                            cursor_bin,
                             "-p",
                             "--output-format",
                             "stream-json",
                             "--workspace",
                             cursor_workspace,
+                            "--trust",  # Auto-trust workspace for non-interactive API usage
                         ]
                         if settings.cursor_agent_disable_indexing:
                             cmd.append("--disable-indexing")
@@ -1962,13 +2003,16 @@ async def chat_completions(
                                 src = "request" if provider_model else ("env" if settings.cursor_agent_model else "default")
                                 logger.info("[%s] cursor-agent model=%s model_src=%s", resp_id, cursor_model, src)
                             cursor_workspace = settings.cursor_agent_workspace or settings.workspace
+                            cursor_bin = _resolve_cursor_agent_bin()
+                            os.makedirs(cursor_workspace, exist_ok=True)
                             cmd = [
-                                settings.cursor_agent_bin,
+                                cursor_bin,
                                 "-p",
                                 "--output-format",
                                 "stream-json",
                                 "--workspace",
                                 cursor_workspace,
+                                "--trust",  # Auto-trust workspace for non-interactive API usage
                             ]
                             if settings.cursor_agent_disable_indexing:
                                 cmd.append("--disable-indexing")

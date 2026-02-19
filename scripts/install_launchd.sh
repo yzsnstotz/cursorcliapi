@@ -26,6 +26,7 @@ Options:
 
 Examples:
   scripts/install_launchd.sh --provider codex --host 127.0.0.1 --port 8000
+  scripts/install_launchd.sh --provider cursor-agent --token devtoken
   scripts/install_launchd.sh --env-file "$PWD/.env" --token devtoken
   scripts/install_launchd.sh --uninstall
 EOF
@@ -72,6 +73,11 @@ while [[ $# -gt 0 ]]; do
 		;;
 	esac
 done
+
+# Default .env for cursor-agent so CURSOR_AGENT_MODEL and token are loaded
+if [[ "$PROVIDER" == "cursor-agent" && -z "$ENV_FILE" && -f "${ROOT_DIR}/.env" ]]; then
+	ENV_FILE="${ROOT_DIR}/.env"
+fi
 
 PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG_DIR="$HOME/Library/Logs"

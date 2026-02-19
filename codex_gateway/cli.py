@@ -150,10 +150,15 @@ def main(argv: list[str] | None = None) -> None:
     elif normalized_provider and not os.environ.get("CODEX_PRESET"):
         # Convenience: if the user calls `agent-cli-to-api <provider>`, apply a sensible preset
         # when it is safe to do so (no hard requirement for a custom .env).
+        # However, if the user has explicitly set provider-specific env vars in .env,
+        # don't override them with a preset.
         if normalized_provider == "codex":
             os.environ.setdefault("CODEX_PRESET", "codex-fast")
         elif normalized_provider == "cursor-agent":
-            os.environ.setdefault("CODEX_PRESET", "cursor-auto")
+            # Only auto-set preset if CURSOR_AGENT_MODEL is not explicitly set in .env
+            if not os.environ.get("CURSOR_AGENT_MODEL"):
+                os.environ.setdefault("CODEX_PRESET", "cursor-auto")
+            # If CURSOR_AGENT_MODEL is set, don't apply preset to avoid overriding user's choice
         elif normalized_provider == "gemini":
             creds = Path(os.environ.get("GEMINI_OAUTH_CREDS_PATH", "~/.gemini/oauth_creds.json")).expanduser()
             if creds.exists():

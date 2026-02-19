@@ -59,10 +59,18 @@ def _apply_preset() -> None:
     """
     Apply an opinionated preset by setting default env vars (without overriding explicitly-set env).
     This keeps the "happy path" config tiny, while still allowing full tuning via env overrides.
+    
+    Note: If provider-specific env vars (like CURSOR_AGENT_MODEL) are already set,
+    we skip applying the preset to avoid overriding user's explicit configuration.
     """
 
     preset = (os.environ.get("CODEX_PRESET") or "").strip().lower().replace("_", "-")
     if not preset:
+        return
+
+    # If user has explicitly set provider-specific env vars, don't apply preset that would override them
+    if preset == "cursor-auto" and os.environ.get("CURSOR_AGENT_MODEL"):
+        # User has explicitly set CURSOR_AGENT_MODEL, skip preset to respect their choice
         return
 
     presets: dict[str, dict[str, str]] = {
@@ -183,6 +191,11 @@ def _apply_preset_env() -> None:
     """
     preset = (os.environ.get("CODEX_PRESET") or "").strip().lower()
     if not preset:
+        return
+    
+    # If user has explicitly set provider-specific env vars, don't apply preset that would override them
+    if preset == "cursor-auto" and os.environ.get("CURSOR_AGENT_MODEL"):
+        # User has explicitly set CURSOR_AGENT_MODEL, skip preset to respect their choice
         return
 
     presets: dict[str, dict[str, str]] = {
@@ -324,13 +337,49 @@ def _env_json_dict_str_str(name: str) -> dict[str, str]:
     return out
 
 
+def _bearer_token_from_env_file() -> str | None:
+    """
+    Read CODEX_GATEWAY_TOKEN from .env file(s) without modifying os.environ.
+    Checks CWD first, then repo root (same policy as _autoload_dotenv).
+    Returns the token value or None if not found.
+    """
+    for env_path in [Path.cwd() / ".env", Path(_GATEWAY_ROOT) / ".env"]:
+        if env_path == Path.cwd() / ".env" and not env_path.exists():
+            continue
+        if not env_path.exists() or not env_path.is_file():
+            continue
+        try:
+            for raw_line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export ") :].strip()
+                key, sep, value = line.partition("=")
+                if not sep:
+                    continue
+                key = key.strip()
+                value = value.strip()
+                if key == "CODEX_GATEWAY_TOKEN" and value:
+                    # Remove quotes if present
+                    if value[0] in {"'", '"'} and value[-1] == value[0]:
+                        value = value[1:-1]
+                    return value
+        except Exception:
+            continue
+    return None
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.environ.get("CODEX_GATEWAY_HOST", "0.0.0.0")
     port: int = _env_int("CODEX_GATEWAY_PORT", 8000)
 
     # If set, requests must include `Authorization: Bearer <token>`.
-    bearer_token: str | None = os.environ.get("CODEX_GATEWAY_TOKEN")
+    # Prefer repo .env so launchd/uv environments that do not pass env vars still work.
+    bearer_token: str | None = (
+        _bearer_token_from_env_file() or os.environ.get("CODEX_GATEWAY_TOKEN")
+    )
 
     # Working directory for `codex exec --cd ...`.
     workspace: str = _resolve_workspace()
